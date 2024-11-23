@@ -1,3 +1,7 @@
+"""
+Main application module for PyImagen
+""" 
+
 import asyncio
 import base64
 import io
