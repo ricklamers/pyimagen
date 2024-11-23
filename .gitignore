@@ -1,0 +1,6 @@
+data/
+.venv/
+
+build/
+dist/
+.env

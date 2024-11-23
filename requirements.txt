@@ -1,0 +1,7 @@
+PyQt6
+Pillow
+requests
+groq
+numpy
+fal-client
+nest-asyncio
