@@ -38,14 +38,20 @@ Set `GROQ_API_KEY` and `FAL_KEY` in `.env` alternatively, enter them when the ap
 
 ## Installation
 
+### PYPI
+```bash
+pip install pyimagen
+pyimagen
+```
+
 ### From Source
 
-1. Clone the repository
+1. Clone the repository and `cd` into it
 2. Install the necessary dependencies:
 
 ```bash
 # Optional
 python -m venv .venv && source .venv/bin/activate 
-pip install -r requirements.txt
+pip install -e .
 python app.py
 ```
