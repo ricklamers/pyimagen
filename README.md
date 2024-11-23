@@ -1,6 +1,9 @@
 # PyImagen
 PyImagen is a desktop application designed for generating AI-driven images using a variety of models via the Fal.ai API, with prompt generation facilitated by Groq's advanced capabilities.
 
+# Inspiration
+[@rikarends](https://x.com/rikarends) inspired me to build this. He has a way nicer [Makepad](https://github.com/makepad/makepad) based version of this.
+
 <img alt="UI" src="https://github.com/user-attachments/assets/3c6748f1-b0ad-4c49-8baa-ce9d6e7d4ee6">
 
 ## Features
