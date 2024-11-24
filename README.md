@@ -4,7 +4,7 @@ PyImagen is a desktop GUI app for generating images using a variety of models vi
 # Inspiration
 [@rikarends](https://x.com/rikarends) [Makepad](https://github.com/makepad/makepad) based version. 
 
-[@ronaldmannak](https://x.com/ronaldmannak)'s Flux AI Studio.
+[@ronaldmannak](https://x.com/ronaldmannak)'s [Flux AI Studio](https://apps.apple.com/nl/app/flux-ai-studio-for-media/id6725615977?l=en-GB&mt=12).
 
 <img alt="UI" src="https://github.com/user-attachments/assets/3c6748f1-b0ad-4c49-8baa-ce9d6e7d4ee6">
 
