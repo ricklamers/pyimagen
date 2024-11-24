@@ -41,10 +41,22 @@ Set `GROQ_API_KEY` and `FAL_KEY` in `.env` alternatively, enter them when the ap
 ## Settings
 ### Configuration
 
-Customize PyImagen via `settings.json`. 
+Customize PyImagen via `settings.json` and `models.json`.
 
-- **prompt-model**: Language model for prompt generation.
-  - **Default**: `"llama-3.1-8b-instant"`
+- **settings.json**
+  - **prompt-model**: Language model for prompt generation.
+    - **Default**: `"llama-3.1-8b-instant"`
+
+- **models.json**
+  - Add custom models by creating a `models.json` file in the `data` directory:
+  ```json
+  {
+    "My Custom Model": "fal-ai/model-id",
+    "Another Model": "fal-ai/another-model"
+  }
+  ```
+  - Custom models will be merged with built-in models
+  - Model ID format: `"provider/model-name"`
 
 ## Installation
 
