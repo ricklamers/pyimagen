@@ -62,6 +62,8 @@ AVAILABLE_MODELS = {
 }
 
 SECRETS_FILE = Path("data/secrets.json")
+SETTINGS_FILE = Path("data/settings.json")
+DEFAULT_PROMPT_MODEL = "llama-3.1-8b-instant"
 
 RESOLUTIONS = {
     "1280x720 (HD)": {"width": 1280, "height": 720},
@@ -95,6 +97,18 @@ def load_models():
     return models
 
 
+def load_settings():
+    """Load settings from settings.json"""
+    settings = {}
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                settings = json.load(f)
+        except Exception as e:
+            print(f"Warning: Error loading settings.json: {e}")
+    return settings
+
+
 class GroqWorker(QThread):
     finished = pyqtSignal(str, float)
     error = pyqtSignal(str)
@@ -102,6 +116,9 @@ class GroqWorker(QThread):
     def __init__(self, groq_key):
         super().__init__()
         self.groq_key = groq_key
+        # Load settings to get prompt model
+        self.settings = load_settings()
+        self.prompt_model = self.settings.get('prompt-model', DEFAULT_PROMPT_MODEL)
 
     def run(self):
         try:
@@ -118,7 +135,7 @@ class GroqWorker(QThread):
                             "content": "Generate a creative and detailed image prompt for an AI image generator. Make it visually interesting and specific. Do not include any quotation marks in your response. Only respond with the prompt text itself, no additional text.",
                         }
                     ],
-                    model="llama-3.1-8b-instant",
+                    model=self.prompt_model,
                     timeout=10
                 )
                 prompt = chat_completion.choices[0].message.content.strip("\"'")
@@ -140,6 +157,9 @@ class PromptEnhancerWorker(QThread):
         self.base_prompt = base_prompt
         self.enhancement_instructions = enhancement_instructions
         self.groq_key = groq_key
+        # Load settings to get prompt model
+        self.settings = load_settings()
+        self.prompt_model = self.settings.get('prompt-model', DEFAULT_PROMPT_MODEL)
 
     def run(self):
         try:
@@ -156,7 +176,7 @@ class PromptEnhancerWorker(QThread):
                             "content": f"Original prompt: {self.base_prompt}\n\nInstructions: {self.enhancement_instructions}\n\nProvide an enhanced version of the original prompt based on these instructions. Only respond with the enhanced prompt text itself, no additional text or quotation marks.",
                         }
                     ],
-                    model="llama-3.1-8b-instant",
+                    model=self.prompt_model,
                     timeout=10
                 )
                 enhanced_prompt = chat_completion.choices[0].message.content.strip(

@@ -38,6 +38,14 @@ PyImagen is a desktop GUI app for generating images using a variety of models vi
 ## API keys
 Set `GROQ_API_KEY` and `FAL_KEY` in `.env` alternatively, enter them when the application starts.
 
+## Settings
+### Configuration
+
+Customize PyImagen via `settings.json`. 
+
+- **prompt-model**: Language model for prompt generation.
+  - **Default**: `"llama-3.1-8b-instant"`
+
 ## Installation
 
 ### PYPI
