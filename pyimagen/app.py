@@ -15,7 +15,7 @@ from pathlib import Path
 import fal_client as fal
 import numpy as np
 import requests
-from groq import Groq
+from groq import Groq, APITimeoutError
 from PIL import Image, ImageQt
 from PyQt6.QtCore import QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap
@@ -36,6 +36,8 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QSpinBox,
+    QGridLayout,
 )
 import mimetypes
 from io import BytesIO
@@ -60,6 +62,19 @@ AVAILABLE_MODELS = {
 }
 
 SECRETS_FILE = Path("data/secrets.json")
+
+RESOLUTIONS = {
+    "1280x720 (HD)": {"width": 1280, "height": 720},
+    "square_hd": "square_hd",
+    "square": "square",
+    "portrait_4_3": "portrait_4_3", 
+    "portrait_16_9": "portrait_16_9",
+    "landscape_4_3": "landscape_4_3",
+    "landscape_16_9": "landscape_16_9",
+    "Custom...": "custom"
+}
+
+SCROLL_WIDTH_PADDING = 12
 
 
 def load_models():
@@ -104,11 +119,14 @@ class GroqWorker(QThread):
                         }
                     ],
                     model="llama-3.1-8b-instant",
+                    timeout=10
                 )
                 prompt = chat_completion.choices[0].message.content.strip("\"'")
 
             elapsed_time = (datetime.now() - start_time).total_seconds()
             self.finished.emit(prompt, elapsed_time)
+        except APITimeoutError:
+            self.error.emit("Groq API request timed out after 10 seconds")
         except Exception as e:
             self.error.emit(str(e))
 
@@ -117,10 +135,11 @@ class PromptEnhancerWorker(QThread):
     finished = pyqtSignal(str, float)
     error = pyqtSignal(str)
 
-    def __init__(self, base_prompt, enhancement_instructions):
+    def __init__(self, base_prompt, enhancement_instructions, groq_key):
         super().__init__()
         self.base_prompt = base_prompt
         self.enhancement_instructions = enhancement_instructions
+        self.groq_key = groq_key
 
     def run(self):
         try:
@@ -129,7 +148,7 @@ class PromptEnhancerWorker(QThread):
             if MOCK_API:
                 enhanced_prompt = f"{self.base_prompt} with magical ethereal lighting and intricate details"
             else:
-                client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+                client = Groq(api_key=self.groq_key)
                 chat_completion = client.chat.completions.create(
                     messages=[
                         {
@@ -138,6 +157,7 @@ class PromptEnhancerWorker(QThread):
                         }
                     ],
                     model="llama-3.1-8b-instant",
+                    timeout=10
                 )
                 enhanced_prompt = chat_completion.choices[0].message.content.strip(
                     "\"'"
@@ -145,6 +165,8 @@ class PromptEnhancerWorker(QThread):
 
             elapsed_time = (datetime.now() - start_time).total_seconds()
             self.finished.emit(enhanced_prompt, elapsed_time)
+        except APITimeoutError:
+            self.error.emit("Groq API request timed out after 10 seconds")
         except Exception as e:
             self.error.emit(str(e))
 
@@ -154,11 +176,12 @@ class ImageGeneratorWorker(QThread):
     error = pyqtSignal(str)
     progress = pyqtSignal(str)
 
-    def __init__(self, prompt, model_id, fal_key):
+    def __init__(self, prompt, model_id, fal_key, image_size):
         super().__init__()
         self.prompt = prompt
         self.model_id = model_id
         self.fal_key = fal_key
+        self.image_size = image_size
 
     def run(self):
         try:
@@ -166,7 +189,11 @@ class ImageGeneratorWorker(QThread):
 
             if MOCK_API:
                 # Generate random noise image instantly
-                width, height = 800, 600
+                if isinstance(self.image_size, dict):
+                    width = self.image_size["width"]
+                    height = self.image_size["height"]
+                else:
+                    width, height = 800, 600
                 random_image = np.random.randint(
                     0, 255, (height, width, 3), dtype=np.uint8
                 )
@@ -180,7 +207,7 @@ class ImageGeneratorWorker(QThread):
                     arguments={
                         "prompt": self.prompt,
                         "num_images": 1,
-                        "image_size": {"width": 1280, "height": 960},
+                        "image_size": self.image_size,
                         "enable_safety_checker": False,
                         "sync_mode": True,
                     },
@@ -325,6 +352,79 @@ class EnhancePromptDialog(QDialog):
         return self.enhance_input.toPlainText()
 
 
+class CustomResolutionDialog(QDialog):
+    def __init__(self, parent=None, current_width=1280, current_height=720):
+        super().__init__(parent)
+        self.setWindowTitle("Custom Resolution")
+        self.setModal(True)
+        
+        # Apply styling
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #2b2b2b;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+            QSpinBox {
+                background-color: #404040;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                color: #ffffff;
+                padding: 5px;
+            }
+            QPushButton {
+                background-color: #404040;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                color: #ffffff;
+                padding: 5px 15px;
+                min-width: 60px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Width input
+        width_layout = QHBoxLayout()
+        width_label = QLabel("Width:")
+        self.width_input = QSpinBox()
+        self.width_input.setRange(64, 4096)  # Reasonable min/max values
+        self.width_input.setValue(current_width)
+        width_layout.addWidget(width_label)
+        width_layout.addWidget(self.width_input)
+        layout.addLayout(width_layout)
+
+        # Height input
+        height_layout = QHBoxLayout()
+        height_label = QLabel("Height:")
+        self.height_input = QSpinBox()
+        self.height_input.setRange(64, 4096)
+        self.height_input.setValue(current_height)
+        height_layout.addWidget(height_label)
+        height_layout.addWidget(self.height_input)
+        layout.addLayout(height_layout)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        cancel_btn = QPushButton("Cancel")
+        button_layout.addWidget(ok_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+
+    def get_resolution(self):
+        return self.width_input.value(), self.height_input.value()
+
+
 class ImageGeneratorApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -356,6 +456,10 @@ class ImageGeneratorApp(QMainWindow):
 
         self.current_model = "SDXL Turbo"  # Default model
 
+        # Initialize resolution state
+        self.current_resolution = {"width": 1280, "height": 720}  # Default resolution
+        self.is_custom_resolution = False  # Track if we're using a custom resolution
+        
         # Initialize UI first
         self.init_ui()
 
@@ -389,7 +493,6 @@ class ImageGeneratorApp(QMainWindow):
                 border-radius: 4px;
             }
         """)
-        history_frame.setMinimumWidth(250)  # Minimum width for history panel
         left_layout = QVBoxLayout(history_frame)
         left_layout.setContentsMargins(4, 4, 4, 4)
 
@@ -438,7 +541,8 @@ class ImageGeneratorApp(QMainWindow):
         self.history_widget = QWidget()
         self.history_layout = QVBoxLayout(self.history_widget)
         self.history_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.history_layout.setSpacing(10)
+        self.history_layout.setSpacing(0)
+        self.history_layout.setContentsMargins(0, 0, 0, 0)
         self.history_layout.addStretch()
         self.scroll_area.setWidget(self.history_widget)
         left_layout.addWidget(self.scroll_area)
@@ -458,6 +562,11 @@ class ImageGeneratorApp(QMainWindow):
 
         # Model selector section
         model_frame = QFrame()
+        model_frame.setObjectName("model_frame")
+        model_frame.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed
+        )
         model_frame.setStyleSheet("""
             QFrame {
                 background-color: #333333;
@@ -475,9 +584,12 @@ class ImageGeneratorApp(QMainWindow):
                 padding: 2px;
             }
         """)
-        model_layout = QHBoxLayout(model_frame)
-        model_layout.setContentsMargins(4, 2, 4, 2)
+        model_layout = QVBoxLayout(model_frame)
+        model_layout.setContentsMargins(4, 4, 4, 4)
+        model_layout.setSpacing(4)
 
+        # Model selector row
+        model_row = QHBoxLayout()
         model_label = QLabel("Model:")
         self.model_selector = QComboBox()
         self.model_selector.addItems(self.available_models.keys())
@@ -486,51 +598,60 @@ class ImageGeneratorApp(QMainWindow):
         self.model_selector.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
+        model_row.addWidget(model_label)
+        model_row.addWidget(self.model_selector)
 
-        # Add timing stats label here
+        # Resolution selector row
+        resolution_row = QHBoxLayout()
+        resolution_label = QLabel("Resolution:")
+        self.resolution_selector = QComboBox()
+        self.update_resolution_selector()
+        self.resolution_selector.currentTextChanged.connect(self.on_resolution_changed)
+        self.resolution_selector.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        resolution_row.addWidget(resolution_label)
+        resolution_row.addWidget(self.resolution_selector)
+
+        # Add timing stats label
+        timing_row = QHBoxLayout()
         self.timing_label = QLabel()
         self.timing_label.setStyleSheet("color: #808080; font-size: 11px;")
+        self.timing_label.setFixedHeight(15)  # Set fixed height for single line
+        self.timing_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed
+        )
+        timing_row.addWidget(self.timing_label)
+        timing_row.addStretch()
 
-        model_layout.addWidget(model_label)
-        model_layout.addWidget(self.model_selector)
-        model_layout.addWidget(self.timing_label)
+        # Add all rows to the model layout
+        model_layout.addLayout(model_row)
+        model_layout.addLayout(resolution_row)
+        model_layout.addLayout(timing_row)
+        
         right_layout.addWidget(model_frame)
 
-        # Create a container for the image and make it expand
-        image_container = QWidget()
-        image_container.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        image_container_layout = QVBoxLayout(image_container)
-        image_container_layout.setContentsMargins(0, 0, 0, 0)
-
-        # Image display section
-        image_frame = QFrame()
-        image_frame.setStyleSheet("""
-            QFrame {
-                background-color: #333333;
-                border-radius: 4px;
-                padding: 4px;
-            }
-        """)
-        image_layout = QVBoxLayout(image_frame)
 
         self.current_image_label = QLabel()
-        self.current_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.current_image_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter  # Center both horizontally and vertically
+        )
         self.current_image_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        image_layout.addWidget(self.current_image_label)
-
-        # Add image frame to container
-        image_container_layout.addWidget(image_frame)
-
-        # Add the expanding container to right layout
-        right_layout.addWidget(image_container)
+        self.current_image_label.setMinimumSize(QSize(100, 100))  # Ensure minimum size
+        right_layout.addWidget(
+            self.current_image_label, 
+            alignment=Qt.AlignmentFlag.AlignCenter  # Center the label in the layout
+        )
 
         # Controls section
         controls_frame = QFrame()
-        controls_frame.setFixedHeight(120)  # Set fixed height for controls frame
+        controls_frame.setObjectName("controls_frame")
+        controls_frame.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
         controls_frame.setStyleSheet("""
             QFrame {
                 background-color: #333333;
@@ -557,8 +678,8 @@ class ImageGeneratorApp(QMainWindow):
             }
         """)
         controls_layout = QVBoxLayout(controls_frame)
-        controls_layout.setSpacing(4)
-        controls_layout.setContentsMargins(4, 4, 4, 4)
+        controls_layout.setSpacing(0)
+        controls_layout.setContentsMargins(0, 0, 0, 0)
 
         # Progress bar with absolute positioning
         self.progress_bar = QProgressBar(controls_frame)
@@ -589,61 +710,59 @@ class ImageGeneratorApp(QMainWindow):
         input_frame = QFrame()
         input_layout = QHBoxLayout(input_frame)
         input_layout.setContentsMargins(0, 0, 0, 0)
-        input_layout.setSpacing(4)  # Add consistent spacing
-        input_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # Align everything to top
+        input_layout.setSpacing(4)
+        input_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        prompt_container = QWidget()  # Create container for prompt
+        prompt_container = QWidget()
         prompt_layout = QVBoxLayout(prompt_container)
         prompt_layout.setContentsMargins(0, 0, 0, 0)
         prompt_layout.setSpacing(0)
-        prompt_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # Align to top
+        prompt_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.prompt_entry = QTextEdit()
-        self.prompt_entry.setFixedHeight(80)  # Fixed height for text edit
+        self.prompt_entry.setFixedHeight(80)  # Keep fixed height for text edit
         self.prompt_entry.setPlaceholderText("Enter your prompt here...")
         self.prompt_entry.installEventFilter(self)
         prompt_layout.addWidget(self.prompt_entry)
 
-        # Create a vertical layout for buttons with no spacing at top
-        button_layout = QVBoxLayout()
+        # Create button container with fixed height matching text edit
+        button_container = QWidget()
+        button_container.setFixedHeight(80)  # Match text edit height
+        button_layout = QVBoxLayout(button_container)
         button_layout.setSpacing(4)
         button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # Align buttons to top
 
-        # Create button grid
-        button_grid = QHBoxLayout()
+        # Create 2x2 grid for buttons
+        button_grid = QGridLayout()
         button_grid.setSpacing(4)
-        button_grid_left = QVBoxLayout()
-        button_grid_left.setSpacing(4)
-        button_grid_right = QVBoxLayout()
-        button_grid_right.setSpacing(4)
 
         # Create buttons
         copy_btn = QPushButton("Copy to Clipboard")
-        copy_btn.clicked.connect(self.copy_to_clipboard)
         random_btn = QPushButton("Random")
-        random_btn.clicked.connect(self.generate_random)
         generate_btn = QPushButton("Generate")
-        generate_btn.clicked.connect(self.generate_image)
         enhance_btn = QPushButton("Enhance Prompt")
+
+        # Connect button signals to their functions
+        copy_btn.clicked.connect(self.copy_to_clipboard)
+        random_btn.clicked.connect(self.generate_random)
+        generate_btn.clicked.connect(self.generate_image)
         enhance_btn.clicked.connect(self.enhance_prompt)
 
-        # Add buttons to the grid with no spacing
-        button_grid_left.addWidget(copy_btn)
-        button_grid_left.addWidget(generate_btn)
-        button_grid_left.addStretch()  # Push buttons to top
+        # Add buttons to grid
+        button_grid.addWidget(copy_btn, 0, 0)
+        button_grid.addWidget(random_btn, 0, 1)
+        button_grid.addWidget(generate_btn, 1, 0)
+        button_grid.addWidget(enhance_btn, 1, 1)
 
-        button_grid_right.addWidget(random_btn)
-        button_grid_right.addWidget(enhance_btn)
-        button_grid_right.addStretch()  # Push buttons to top
-
-        button_grid.addLayout(button_grid_left)
-        button_grid.addLayout(button_grid_right)
+        # Set equal size policy for all buttons
+        for btn in [copy_btn, random_btn, generate_btn, enhance_btn]:
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         button_layout.addLayout(button_grid)
-
+        
+        # Add widgets to input layout
         input_layout.addWidget(prompt_container, stretch=1)
-        input_layout.addLayout(button_layout)
+        input_layout.addWidget(button_container)
 
         controls_layout.addWidget(input_frame)
 
@@ -671,6 +790,8 @@ class ImageGeneratorApp(QMainWindow):
 
         self.is_generating = True
         self.progress_bar.show()
+        self.progress_bar.setMaximum(0)
+        self.progress_bar.raise_()
 
         groq_key = self.get_api_key("GROQ_API_KEY")
         self.groq_worker = GroqWorker(groq_key)
@@ -688,9 +809,13 @@ class ImageGeneratorApp(QMainWindow):
         if not self.is_generating:
             self.is_generating = True
             self.progress_bar.show()
+            self.progress_bar.setMaximum(0)
+            self.progress_bar.raise_()
 
         prompt = self.prompt_entry.toPlainText()
         if not prompt:
+            self.is_generating = False
+            self.progress_bar.hide()
             return
 
         # Update current model from dropdown
@@ -698,7 +823,10 @@ class ImageGeneratorApp(QMainWindow):
 
         fal_key = self.get_api_key("FAL_KEY")
         self.image_worker = ImageGeneratorWorker(
-            prompt, self.available_models[self.current_model], fal_key
+            prompt, 
+            self.available_models[self.current_model], 
+            fal_key,
+            self.current_resolution
         )
         self.image_worker.finished.connect(self.handle_generated_image)
         self.image_worker.error.connect(self.handle_generation_error)
@@ -774,15 +902,31 @@ class ImageGeneratorApp(QMainWindow):
 
     def update_display(self, img, index):
         # First ensure the label has a reasonable minimum size
-        self.current_image_label.setMinimumSize(800, 600)
+        self.current_image_label.setMinimumSize(100, 100)
 
         # Wait for the layout to update
         QTimer.singleShot(0, lambda: self._update_display_delayed(img))
 
     def _update_display_delayed(self, img):
-        # Get the available size for the image
-        available_width = self.current_image_label.width()
-        available_height = self.current_image_label.height()
+        # Get the right frame's total height
+        right_frame = self.current_image_label.parent()
+        total_height = right_frame.height()
+        
+        # Get heights of other elements
+        model_frame = right_frame.findChild(QFrame, "model_frame")
+        controls_frame = right_frame.findChild(QFrame, "controls_frame")
+        
+        model_height = model_frame.height() if model_frame else 0
+        controls_height = controls_frame.height() if controls_frame else 0
+        
+        # Calculate available space
+        available_width = right_frame.width() - (right_frame.layout().contentsMargins().left() + 
+                                               right_frame.layout().contentsMargins().right())
+        available_height = total_height - model_height - controls_height - (
+            right_frame.layout().contentsMargins().top() +
+            right_frame.layout().contentsMargins().bottom() +
+            right_frame.layout().spacing() * 2  # Account for spacing between widgets
+        )
 
         # Create pixmap and scale it to fit the available space
         pixmap = self.get_scaled_pixmap(img, QSize(available_width, available_height))
@@ -802,16 +946,17 @@ class ImageGeneratorApp(QMainWindow):
         thumb_frame.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        thumb_layout = QVBoxLayout(thumb_frame)
-        thumb_layout.setContentsMargins(4, 2, 4, 2)
+        thumb_layout = QVBoxLayout(thumb_frame)  # Changed to QHBoxLayout for horizontal alignment
+        thumb_layout.setContentsMargins(0, 0, 0, 8)  # Added 8px bottom margin
+        thumb_layout.setSpacing(0)  # Added some spacing between image and text
 
-        scroll_width = self.scroll_area.viewport().width() - 20
-        thumb_size = QSize(scroll_width, scroll_width)
+        scroll_width = self.scroll_area.viewport().width() - SCROLL_WIDTH_PADDING
+        thumb_size = QSize(scroll_width // 2, scroll_width // 2)  # Reduced thumb size to half
         pixmap = self.get_scaled_pixmap(img, thumb_size)
 
         thumb_label = QLabel()
         thumb_label.setPixmap(pixmap)
-        thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        thumb_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         thumb_label.mousePressEvent = lambda e, idx=index: self.show_historical_image(
             idx
         )
@@ -821,28 +966,27 @@ class ImageGeneratorApp(QMainWindow):
 
         # Add prompt text with ellipsis
         prompt_label = QLabel()
-        prompt_label.setMaximumWidth(scroll_width)
-        prompt_label.setStyleSheet("color: gray; font-size: 10px;")
+        prompt_label.setMaximumWidth(scroll_width // 2)  # Set max width to half of scroll area
+        prompt_label.setStyleSheet("color: gray; padding-top: 2px; margin-left: -2px; font-size: 10px;")
 
         prompt_text = self.generated_images[index]["prompt"]
         metrics = prompt_label.fontMetrics()
         elidedText = metrics.elidedText(
-            prompt_text, Qt.TextElideMode.ElideRight, scroll_width - 10
+            prompt_text, Qt.TextElideMode.ElideRight, (scroll_width // 2) - SCROLL_WIDTH_PADDING
         )
         prompt_label.setText(elidedText)
 
         prompt_label.setTextFormat(Qt.TextFormat.PlainText)
-        prompt_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        prompt_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         prompt_label.setToolTip(prompt_text)
 
         prompt_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
-        prompt_label.setMinimumHeight(15)
-        prompt_label.setMaximumHeight(15)
+        prompt_label.setWordWrap(True)  # Allow text to wrap
 
         thumb_layout.addWidget(thumb_label)
-        thumb_layout.addWidget(prompt_label)
+        thumb_layout.addWidget(prompt_label, 1)  # Give prompt label more stretch
 
         self.history_layout.addWidget(thumb_frame)
 
@@ -1016,9 +1160,13 @@ class ImageGeneratorApp(QMainWindow):
 
             self.is_generating = True
             self.progress_bar.show()
+            self.progress_bar.setMaximum(0)
+            self.progress_bar.raise_()
 
+            # Get Groq API key and pass it to the worker
+            groq_key = self.get_api_key("GROQ_API_KEY")
             self.prompt_enhancer = PromptEnhancerWorker(
-                current_prompt, enhancement_instructions
+                current_prompt, enhancement_instructions, groq_key
             )
             self.prompt_enhancer.finished.connect(self.on_prompt_enhanced)
             self.prompt_enhancer.error.connect(self.handle_generation_error)
@@ -1051,7 +1199,7 @@ class ImageGeneratorApp(QMainWindow):
         QTimer.singleShot(0, self.update_all_thumbnails)
 
     def update_all_thumbnails(self):
-        scroll_width = self.scroll_area.viewport().width() - 20
+        scroll_width = self.scroll_area.viewport().width() - SCROLL_WIDTH_PADDING
 
         # Update each thumbnail in the history layout
         for i in range(self.history_layout.count()):
@@ -1084,7 +1232,7 @@ class ImageGeneratorApp(QMainWindow):
                                     elidedText = metrics.elidedText(
                                         prompt_text,
                                         Qt.TextElideMode.ElideRight,
-                                        scroll_width - 10,
+                                        scroll_width - SCROLL_WIDTH_PADDING
                                     )
                                     prompt_label.setText(elidedText)
 
@@ -1223,6 +1371,72 @@ class ImageGeneratorApp(QMainWindow):
         dialog.reject()
         if not self.get_api_key("GROQ_API_KEY") or not self.get_api_key("FAL_KEY"):
             self.close()
+
+    def update_resolution_selector(self):
+        """Update resolution selector with current resolution"""
+        current_text = self.resolution_selector.currentText()
+        self.resolution_selector.clear()
+        
+        # If using custom resolution, add it as first item
+        if isinstance(self.current_resolution, dict):
+            current = f"{self.current_resolution['width']}x{self.current_resolution['height']}"
+            # Only add as first item if it's not HD resolution
+            if current != "1280x720":
+                self.resolution_selector.addItem(current)
+        
+        # Add all predefined resolutions
+        for resolution in RESOLUTIONS.keys():
+            self.resolution_selector.addItem(resolution)
+            
+        # Select the appropriate item
+        if isinstance(self.current_resolution, str):
+            # For enum values, find and select the matching predefined resolution
+            for name, value in RESOLUTIONS.items():
+                if value == self.current_resolution:
+                    self.resolution_selector.setCurrentText(name)
+                    break
+        else:
+            # For dict values (including custom), find or select the current resolution
+            current = f"{self.current_resolution['width']}x{self.current_resolution['height']}"
+            index = self.resolution_selector.findText(current)
+            if index >= 0:
+                self.resolution_selector.setCurrentIndex(index)
+            else:
+                # Must be custom, it will be the first item
+                self.resolution_selector.setCurrentIndex(0)
+
+    def on_resolution_changed(self, selected_resolution):
+        """Handle resolution selection change"""
+        if selected_resolution == "Custom...":
+            # Get current width/height, defaulting to HD if current_resolution is a string
+            current_width = self.current_resolution.get('width', 1280) if isinstance(self.current_resolution, dict) else 1280
+            current_height = self.current_resolution.get('height', 720) if isinstance(self.current_resolution, dict) else 720
+            
+            dialog = CustomResolutionDialog(
+                self,
+                current_width=current_width,
+                current_height=current_height
+            )
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                width, height = dialog.get_resolution()
+                self.current_resolution = {"width": width, "height": height}
+                self.update_resolution_selector()
+        else:
+            # Check if it's a custom resolution (must be first item if present)
+            if selected_resolution not in RESOLUTIONS:
+                # Parse the WxH format
+                try:
+                    width, height = map(int, selected_resolution.split('x'))
+                    self.current_resolution = {"width": width, "height": height}
+                except ValueError:
+                    pass  # Ignore invalid format
+            else:
+                # It's a predefined resolution
+                resolution = RESOLUTIONS[selected_resolution]
+                if isinstance(resolution, dict):
+                    self.current_resolution = resolution.copy()
+                else:
+                    self.current_resolution = resolution  # It's an enum string
 
 
 def main():
