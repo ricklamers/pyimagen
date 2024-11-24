@@ -966,27 +966,31 @@ class ImageGeneratorApp(QMainWindow):
         thumb_frame.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
         )
-        thumb_layout = QVBoxLayout(thumb_frame)  # Changed to QHBoxLayout for horizontal alignment
-        thumb_layout.setContentsMargins(0, 0, 0, 8)  # Added 8px bottom margin
-        thumb_layout.setSpacing(0)  # Added some spacing between image and text
+        thumb_layout = QVBoxLayout(thumb_frame)
+        thumb_layout.setContentsMargins(0, 0, 0, 8)
+        thumb_layout.setSpacing(0)
 
+        # Calculate correct initial size based on scroll area width
         scroll_width = self.scroll_area.viewport().width() - SCROLL_WIDTH_PADDING
-        thumb_size = QSize(scroll_width // 2, scroll_width // 2)  # Reduced thumb size to half
+        thumb_size = QSize(scroll_width // 2, scroll_width // 2)
+
+        # Force layout update to ensure correct size calculation
+        self.scroll_area.updateGeometry()
+        
+        # Create scaled pixmap with correct initial size
         pixmap = self.get_scaled_pixmap(img, thumb_size)
 
         thumb_label = QLabel()
         thumb_label.setPixmap(pixmap)
         thumb_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        thumb_label.mousePressEvent = lambda e, idx=index: self.show_historical_image(
-            idx
-        )
+        thumb_label.mousePressEvent = lambda e, idx=index: self.show_historical_image(idx)
 
         # Store the index in the frame for later reference
         thumb_frame.setProperty("image_index", index)
 
         # Add prompt text with ellipsis
         prompt_label = QLabel()
-        prompt_label.setMaximumWidth(scroll_width // 2)  # Set max width to half of scroll area
+        prompt_label.setMaximumWidth(scroll_width // 2)
         prompt_label.setStyleSheet("color: gray; padding-top: 2px; margin-left: -2px; font-size: 10px;")
 
         prompt_text = self.generated_images[index]["prompt"]
@@ -1003,16 +1007,21 @@ class ImageGeneratorApp(QMainWindow):
         prompt_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
-        prompt_label.setWordWrap(True)  # Allow text to wrap
+        prompt_label.setWordWrap(True)
 
         thumb_layout.addWidget(thumb_label)
-        thumb_layout.addWidget(prompt_label, 1)  # Give prompt label more stretch
+        thumb_layout.addWidget(prompt_label, 1)
 
         self.history_layout.addWidget(thumb_frame)
 
         if not initial_load:
             self.history_layout.addStretch()
-            QTimer.singleShot(0, self.scroll_to_bottom)
+            # First update thumbnails
+            QTimer.singleShot(0, lambda: (
+                self.update_all_thumbnails(),
+                # Then schedule scroll to bottom
+                QTimer.singleShot(0, self.scroll_to_bottom)
+            ))
 
     def scroll_to_bottom(self):
         # Ensure layout is updated
